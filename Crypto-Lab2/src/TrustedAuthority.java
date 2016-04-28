@@ -9,6 +9,7 @@ import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.NoSuchAlgorithmException;
+import java.util.Random;
 
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -16,11 +17,12 @@ import javax.crypto.SecretKey;
 
 public class TrustedAuthority {
 
-    final int PORT = 9090	;
+    final int PORT = 9090;
     ServerSocket serverSocket;
     Socket socket;
     int orderNumber;
     DataOutputStream out;
+    int secretTotal = 0;
     		
     public static void main(String args[]) {
     	TrustedAuthority server = new TrustedAuthority ();
@@ -55,25 +57,32 @@ public class TrustedAuthority {
                 
                 KeyGenerator keyGen;
                 SecretKey key;
-				try {
+			
 					//keyGen = KeyGenerator.getInstance("HmacMD5");
 					//key = keyGen.generateKey();
 					
 		            // Generate a key for the HMAC-SHA1 keyed-hashing algorithm
-		            keyGen = KeyGenerator.getInstance("HmacSHA1");
+		           /* keyGen = KeyGenerator.getInstance("HmacSHA1");
 		            key = keyGen.generateKey();
 		            
 		            //Change to byte array
 		            byte[] keyEncoded = key.getEncoded();
-		            
+		            */
+					
+					Random rand = new Random(293318734);
+					int secret = rand.nextInt(34985039);
+					
+					secretTotal+=secret;
+					
+					out.writeInt(secret);
+					
+					
 		            //Write the lenght of the byte array and then the key itself to whoever has connected
-		            out.writeInt(keyEncoded.length);
-		            out.write(keyEncoded);
+		            //out.writeInt(keyEncoded.length);
+		           // out.write(keyEncoded);
 		            
-				} catch (NoSuchAlgorithmException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
+		
+				
            
 
                      

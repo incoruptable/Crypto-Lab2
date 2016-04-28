@@ -42,23 +42,21 @@ public class User {
 	  public User(){
 		  
 		  Random rand = new Random(delta);
-		  value = rand.nextInt();
+		  value = rand.nextInt(delta);
 		  System.out.println("User generated value: " + value);
 		  try {
 				
-				trustedSocket = new Socket("192.252.76.94",portTrusted);
+				trustedSocket = new Socket("localhost",portTrusted);
 				
 				in= new DataInputStream(trustedSocket.getInputStream());
 				
 				System.out.println("Connected to localhost in port 4921 - User");
 				
 				//Read in the key the trusted authority sends
-				int length = in.readInt();
-				secretKey = new byte[length];
-				in.read(secretKey);
-				
-				//Change it to the actual secret key
-				SecretKeySpec signingKey = new SecretKeySpec(secretKey,hmac);
+				int secret = in.readInt();
+			
+				//Change the integer to a byte array and put it as a secret key
+				SecretKeySpec signingKey = new SecretKeySpec(ByteBuffer.allocate(4).putInt(secret).array(),hmac);
 				
 				m = Math.pow(2,(Math.log(2 * delta)/Math.log(2)));
 				
@@ -77,24 +75,13 @@ public class User {
 				double userKey = HMAC % m;
 				
 				System.out.println("User key: " + userKey);
+
+				double cipherText = (userKey + value) % m;
 				
-				SecretKeySpec userSecretKey = new SecretKeySpec(ByteBuffer.allocate(16).putDouble(userKey).array(),"AES");
-				
-				System.out.println(userSecretKey);
-				
-				Cipher AESencrypt = Cipher.getInstance("AES");
-				AESencrypt.init(Cipher.ENCRYPT_MODE, userSecretKey);
-				
-			
-				byte[] cipherText = AESencrypt.doFinal(ByteBuffer.allocate(4).putInt(value).array());
-				
-				//Connect to the aggregator and send the ciphertext
-				//192.252.76.94 "10.74.32.3"
 				aggregatorSocket = new Socket("localhost",PORTagg);
 				
 				DataOutputStream out = new DataOutputStream(aggregatorSocket.getOutputStream());
-				out.writeInt(cipherText.length);
-				out.write(cipherText);
+				out.writeDouble(cipherText);
 				
 			} catch (UnknownHostException e) {
 				e.printStackTrace();
@@ -103,13 +90,6 @@ public class User {
 			} catch (NoSuchAlgorithmException e) {
 				e.printStackTrace();
 			} catch (InvalidKeyException e) {
-				e.printStackTrace();
-			} catch (NoSuchPaddingException e) {
-				e.printStackTrace();
-			} catch (IllegalBlockSizeException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (BadPaddingException e) {
 				e.printStackTrace();
 			}
 	  }
