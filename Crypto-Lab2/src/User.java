@@ -41,8 +41,10 @@ public class User {
 	
 	  public User(){
 		  
-		  Random rand = new Random(delta);
-		  value = rand.nextInt(delta);
+		Random rand = new Random(293318734);
+		BigInteger value = new BigInteger(128,rand);
+			
+		  
 		  System.out.println("User generated value: " + value);
 		  try {
 				
@@ -53,12 +55,19 @@ public class User {
 				System.out.println("Connected to localhost in port 4921 - User");
 				
 				//Read in the key the trusted authority sends
-				int secret = in.readInt();
+				int length = in.readInt();
+				byte[] secretByte = new byte[length];
+				in.read(secretByte);
+				
+				//BigInteger secret
+				BigInteger secret = new BigInteger(secretByte);
 			
 				//Change the integer to a byte array and put it as a secret key
-				SecretKeySpec signingKey = new SecretKeySpec(ByteBuffer.allocate(4).putInt(secret).array(),hmac);
+				SecretKeySpec signingKey = new SecretKeySpec(secret.toByteArray(),hmac);
 				
 				m = Math.pow(2,(Math.log(2 * delta)/Math.log(2)));
+				
+				BigInteger bigIntM = new BigInteger(ByteBuffer.allocate(8).putDouble(m).array());
 				
 				Mac mac = Mac.getInstance(hmac);
 				mac.init(signingKey);
@@ -68,20 +77,20 @@ public class User {
 				System.out.println("hmac result: " + hmacResult);
 				
 				//Change hmacresult to double so we can mod?
-				//BigInteger HMAC = new BigInteger(hmacResult);
-				double HMAC = ByteBuffer.wrap(hmacResult).getDouble();
-				
+				BigInteger HMAC = new BigInteger(hmacResult);
+		
 				//computer k0
-				double userKey = HMAC % m;
+				BigInteger userKey = HMAC.mod(bigIntM);
 				
 				System.out.println("User key: " + userKey);
 
-				double cipherText = (userKey + value) % m;
+				BigInteger cipherText = userKey.add(value).mod(bigIntM);
 				
 				aggregatorSocket = new Socket("localhost",PORTagg);
 				
 				DataOutputStream out = new DataOutputStream(aggregatorSocket.getOutputStream());
-				out.writeDouble(cipherText);
+				out.writeInt(cipherText.toByteArray().length);
+				out.write(cipherText.toByteArray());
 				
 			} catch (UnknownHostException e) {
 				e.printStackTrace();

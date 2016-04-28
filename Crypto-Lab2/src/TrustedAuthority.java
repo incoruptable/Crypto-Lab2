@@ -6,9 +6,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.math.BigInteger;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Random;
 
 import javax.crypto.KeyGenerator;
@@ -23,7 +25,8 @@ public class TrustedAuthority {
     int orderNumber;
     DataOutputStream out;
     int secretTotal = 0;
-    		
+    ArrayList<BigInteger> keys = new ArrayList<BigInteger>();	
+    
     public static void main(String args[]) {
     	TrustedAuthority server = new TrustedAuthority ();
     }
@@ -45,6 +48,8 @@ public class TrustedAuthority {
         
         while (true) {
             try {
+            	
+            	
             	//Accept the connection
                 socket = serverSocket.accept();   
                 
@@ -53,40 +58,26 @@ public class TrustedAuthority {
                 
                 System.out.println("Trusted Authority recieved connection from " + serverSocket.getInetAddress().getHostName());
 
-                //Trusted authority should just connect to all users and distribute the keys immediately
-                
-                KeyGenerator keyGen;
-                SecretKey key;
-			
-					//keyGen = KeyGenerator.getInstance("HmacMD5");
-					//key = keyGen.generateKey();
-					
-		            // Generate a key for the HMAC-SHA1 keyed-hashing algorithm
-		           /* keyGen = KeyGenerator.getInstance("HmacSHA1");
-		            key = keyGen.generateKey();
-		            
-		            //Change to byte array
-		            byte[] keyEncoded = key.getEncoded();
-		            */
-					
+                if(secretTotal ==2){
+                	
+                	//Sends both keys to the aggregator
+                	for(int x = 0; x < keys.size(); x++){
+                		out.writeInt(keys.get(x).toByteArray().length);
+    					out.write(keys.get(x).toByteArray());
+                	}
+            	
+                }
+                else{
 					Random rand = new Random(293318734);
-					int secret = rand.nextInt(34985039);
+					BigInteger secretKey = new BigInteger(128,rand);
 					
-					secretTotal+=secret;
+					keys.add(secretKey);
+					secretTotal++;
 					
-					out.writeInt(secret);
-					
-					
-		            //Write the lenght of the byte array and then the key itself to whoever has connected
-		            //out.writeInt(keyEncoded.length);
-		           // out.write(keyEncoded);
-		            
-		
-				
-           
+					out.writeInt(secretKey.toByteArray().length);
+					out.write(secretKey.toByteArray());
+                }
 
-                     
-    
             } catch (IOException e) {
                 System.out.println("I/O error: " + e);
                 e.printStackTrace();
