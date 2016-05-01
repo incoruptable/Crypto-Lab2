@@ -6,6 +6,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.math.BigInteger;
+import java.net.ConnectException;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
@@ -86,8 +87,22 @@ public class User {
 
 				BigInteger cipherText = userKey.add(value).mod(bigIntM);
 				
-				aggregatorSocket = new Socket("localhost",PORTagg);
-				
+				while(true){
+					try{
+						aggregatorSocket = new Socket("localhost",PORTagg);
+						break;
+					}
+					catch(ConnectException e)
+					{
+						System.out.print("Connection failed, waiting to try again \n");
+						try{
+							Thread.sleep(2000);
+						}
+						catch(InterruptedException ie){
+							ie.printStackTrace();
+						}
+					}
+				}
 				DataOutputStream out = new DataOutputStream(aggregatorSocket.getOutputStream());
 				out.writeInt(cipherText.toByteArray().length);
 				out.write(cipherText.toByteArray());

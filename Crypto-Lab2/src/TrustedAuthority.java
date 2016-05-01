@@ -64,6 +64,8 @@ public class TrustedAuthority {
                 	for(int x = 0; x < keys.size(); x++){
                 		out.writeInt(keys.get(x).toByteArray().length);
     					out.write(keys.get(x).toByteArray());
+    					
+    					System.out.print("Sent a key");
                 	}
             	
                 }

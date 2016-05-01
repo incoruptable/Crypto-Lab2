@@ -2,6 +2,7 @@ import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.math.BigInteger;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
@@ -21,10 +22,13 @@ public class Aggregator {
 	private Socket userSocket = null;
 	private ArrayList<byte[]> cipherTexts;
 	private ArrayList<Integer> cipherLengths;
-	private byte[] key;
-	private double m;
-	private double sum;
-	private SecretKeySpec signingKey;
+	private ArrayList<byte[]> authorityKeys;
+	private ArrayList<Integer> keyLengths;
+	private BigInteger key;
+	private BigInteger m;
+	private BigInteger sum;
+	private ArrayList<SecretKeySpec> signingKeys;
+	byte[] secretKey;
 	
 	public static void main (String args[])
 	{
@@ -34,23 +38,38 @@ public class Aggregator {
 	public void startServer(){
 		//This is the Aggregator
 		
-		final ExecutorService userProcessingPool = Executors.newFixedThreadPool(2);
+		
+		keyLengths = new ArrayList<Integer>();
+		authorityKeys = new ArrayList<byte[]>();
+		cipherLengths = new ArrayList<Integer>();
+		cipherTexts = new ArrayList<byte[]>();
+		signingKeys = new ArrayList<SecretKeySpec>();
 		
 		Socket trustedSocket;
 		try {
-			trustedSocket = new Socket("192.252.76.94", 9090);
+			trustedSocket = new Socket("localhost", 9090);
+			
 		
 		DataInputStream in= new DataInputStream(trustedSocket.getInputStream());
 
 		System.out.println("Connected to localhost in port 4921 - User");
 
 		//Read in the key the trusted authority sends
-		int length = in.readInt();
-		byte[] secretKey = new byte[length];
-		in.read(secretKey);
+		while(authorityKeys.size() < 2) {
+			keyLengths.add(in.readInt());
+			secretKey = new byte[keyLengths.get(keyLengths.size()-1)];
+			
+			System.out.print("Key Length = " + keyLengths.get(keyLengths.size()-1));
+			
+			in.read(secretKey);
 
-		//Change it to the actual secret key
-		signingKey = new SecretKeySpec(secretKey,"HmacSHA1");
+			System.out.print(" Key = " + secretKey + "\n");
+			authorityKeys.add(secretKey);
+			//Change it to the actual secret key
+			signingKeys.add(new SecretKeySpec(secretKey,"HmacSHA1"));
+		}
+
+
 		} catch (UnknownHostException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -61,20 +80,22 @@ public class Aggregator {
 
 			
 		generateKey();
-		Runnable aggregatorTask = new Runnable() {
+		Runnable aggregatorTask = new Runnable() { 
 			@Override
 			public void run() {
 				try{
+					ExecutorService userProcessingPool = Executors.newFixedThreadPool(2);
 					aggregatorSocket = new ServerSocket(4921);
 					System.out.println("Waiting for connections");
 					while (true){
 						userSocket = aggregatorSocket.accept();
 						userProcessingPool.submit(new AggregationTask(userSocket));
 						if(cipherLengths.size() == 2){
+							System.out.print("cipherLengths.size() = " + cipherLengths.size());
+							decryptAggregate();
 							break;
 						}
 					}
-					decryptAggregate();
 				}
 				catch(IOException e) {
 					System.err.println("Unable to process request");
@@ -89,25 +110,28 @@ public class Aggregator {
 	private void generateKey() {
 		// Generating K0
 		int delta = 123456;
-		key = new byte[8];
-		m = Math.pow(2,(Math.log(2*delta)/Math.log(2)));
+		double doublem = Math.pow(2,(Math.log(2*delta)/Math.log(2)));
+		m = new BigInteger(ByteBuffer.allocate(8).putDouble(doublem).array());
 		System.out.println("Mac about to be initialized");
+		byte[] hMacResult;
+		BigInteger HMAC = null;
+		BigInteger HMACSum = new BigInteger("0");
 		try {
-			Mac mac = Mac.getInstance("HmacSHA1"); 
-			mac.init(signingKey);
-			int t = 45;
+			for(int i = 0; i < 2; i++){
+					
+				Mac mac = Mac.getInstance("HmacSHA1"); 
+				mac.init(signingKeys.get(i));
+				int t = 45;
+				hMacResult = mac.doFinal(ByteBuffer.allocate(t). array());
+				HMAC = new BigInteger(hMacResult);
+				HMACSum = HMACSum.add(HMAC);
+			}
 			
-			System.out.print("Mac intialized");
-			//performing HMAC for time interval t
-			byte[] hMacResult = mac.doFinal(ByteBuffer.allocate(t). array());
-			double HMAC = ByteBuffer.wrap(hMacResult).getDouble();
-			
-			System.out.print("HMAC result = " + HMAC);
+			System.out.print("HMAC Sum = " + HMACSum);
 			
 			
 			//performing MOD M
-			HMAC = HMAC % m;
-			ByteBuffer.wrap(key).putDouble(HMAC);
+			key = HMACSum.mod(m);
 			
 			System.out.print("Key = " + key);
 		}catch (NoSuchAlgorithmException e) {
@@ -122,14 +146,15 @@ public class Aggregator {
 	}
 
 	protected void decryptAggregate() {
+		BigInteger cipherSum = new BigInteger("0");
 		for(byte[] x: cipherTexts){
-			double cipherText = ByteBuffer.wrap(x).getDouble();
-			double tempKey = ByteBuffer.wrap(key).getDouble();
+			BigInteger cipherText = new BigInteger(x);
 			
-			cipherText = cipherText - tempKey;
-			double partofSum = cipherText % m;
-			sum += partofSum;
+			cipherSum = cipherSum.add(cipherText);
 		}
+		
+		cipherSum.subtract(key);
+		sum = cipherSum.mod(m);
 		System.out.print("This is the sum: " + sum);
 	}
 
@@ -163,6 +188,11 @@ public class Aggregator {
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
+			}
+			try{
+				userSocket.close();
+			}catch(IOException ioe){
+				System.out.print("Error closing user Connection");
 			}
 			
 		}
