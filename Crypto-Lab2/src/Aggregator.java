@@ -10,8 +10,10 @@ import java.nio.ByteBuffer;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -20,8 +22,8 @@ import javax.crypto.spec.SecretKeySpec;
 public class Aggregator {
 	private ServerSocket aggregatorSocket = null;
 	private Socket userSocket = null;
-	private ArrayList<byte[]> cipherTexts;
-	private ArrayList<Integer> cipherLengths;
+	private CopyOnWriteArrayList<byte[]> cipherTexts;
+	private CopyOnWriteArrayList<Integer> cipherLengths;
 	private ArrayList<byte[]> authorityKeys;
 	private ArrayList<Integer> keyLengths;
 	private BigInteger key;
@@ -41,8 +43,8 @@ public class Aggregator {
 		
 		keyLengths = new ArrayList<Integer>();
 		authorityKeys = new ArrayList<byte[]>();
-		cipherLengths = new ArrayList<Integer>();
-		cipherTexts = new ArrayList<byte[]>();
+		cipherLengths = new CopyOnWriteArrayList<Integer>();
+		cipherTexts = new CopyOnWriteArrayList<byte[]>();
 		signingKeys = new ArrayList<SecretKeySpec>();
 		
 		Socket trustedSocket;
@@ -80,32 +82,33 @@ public class Aggregator {
 
 			
 		generateKey();
-		Runnable aggregatorTask = new Runnable() { 
-			@Override
-			public void run() {
-				try{
-					ExecutorService userProcessingPool = Executors.newFixedThreadPool(2);
-					aggregatorSocket = new ServerSocket(4921);
-					System.out.println("Waiting for connections");
-					while (true){
-						userSocket = aggregatorSocket.accept();
-						userProcessingPool.submit(new AggregationTask(userSocket));
-						if(cipherLengths.size() == 2){
-							System.out.print("cipherLengths.size() = " + cipherLengths.size());
-							decryptAggregate();
-							break;
-						}
-					}
-				}
-				catch(IOException e) {
-					System.err.println("Unable to process request");
-					e.printStackTrace();
+		try{
+			ExecutorService userProcessingPool = Executors.newFixedThreadPool(2);
+			aggregatorSocket = new ServerSocket(4921);
+			System.out.println("Waiting for connections");
+			int threadNumber = 0;
+			while (true){
+				userSocket = aggregatorSocket.accept();
+				threadNumber++;
+				userProcessingPool.submit(new AggregationTask(userSocket));
+				if(threadNumber == 2){
+					break;
 				}
 			}
-		};
-		Thread aggregatorThread = new Thread(aggregatorTask);
-		aggregatorThread.start();
+			System.out.print("cipherLengths.size() = " + cipherLengths.size());
+			userProcessingPool.shutdown();
+			userProcessingPool.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+			if(cipherLengths.size() == 2){
+				System.out.print("cipherLengths.size() = " + cipherLengths.size());
+				decryptAggregate();
+			}
+		}
+		catch(IOException | InterruptedException e) {
+			System.err.println("Unable to process request");
+			e.printStackTrace();
+		}
 	}
+			
 	
 	private void generateKey() {
 		// Generating K0
