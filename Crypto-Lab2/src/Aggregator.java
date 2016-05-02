@@ -1,7 +1,12 @@
+import java.awt.List;
 import java.io.BufferedReader;
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -10,10 +15,10 @@ import java.nio.ByteBuffer;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -22,15 +27,17 @@ import javax.crypto.spec.SecretKeySpec;
 public class Aggregator {
 	private ServerSocket aggregatorSocket = null;
 	private Socket userSocket = null;
-	private CopyOnWriteArrayList<byte[]> cipherTexts;
-	private CopyOnWriteArrayList<Integer> cipherLengths;
-	private ArrayList<byte[]> authorityKeys;
-	private ArrayList<Integer> keyLengths;
-	private BigInteger key;
-	private BigInteger m;
-	private BigInteger sum;
-	private ArrayList<SecretKeySpec> signingKeys;
-	byte[] secretKey;
+	private static CopyOnWriteArrayList<byte[]> cipherTexts = new CopyOnWriteArrayList<byte[]>();
+	private static CopyOnWriteArrayList<Integer> cipherLengths = new CopyOnWriteArrayList<Integer>();
+	private static CopyOnWriteArrayList<BigInteger> secrets = new CopyOnWriteArrayList<BigInteger>();
+
+	private byte[] key;
+	private double m;
+	private double sum;
+	private SecretKeySpec signingKey;
+	BigInteger key0;
+	BigInteger bigIntM;
+	private static int connections = 0;
 	
 	public static void main (String args[])
 	{
@@ -40,103 +47,124 @@ public class Aggregator {
 	public void startServer(){
 		//This is the Aggregator
 		
-		
-		keyLengths = new ArrayList<Integer>();
-		authorityKeys = new ArrayList<byte[]>();
-		cipherLengths = new CopyOnWriteArrayList<Integer>();
-		cipherTexts = new CopyOnWriteArrayList<byte[]>();
-		signingKeys = new ArrayList<SecretKeySpec>();
+		final ExecutorService userProcessingPool = Executors.newFixedThreadPool(2);
 		
 		Socket trustedSocket;
 		try {
 			trustedSocket = new Socket("localhost", 9090);
-			
 		
-		DataInputStream in= new DataInputStream(trustedSocket.getInputStream());
-
-		System.out.println("Connected to localhost in port 4921 - User");
-
-		//Read in the key the trusted authority sends
-		while(authorityKeys.size() < 2) {
-			keyLengths.add(in.readInt());
-			secretKey = new byte[keyLengths.get(keyLengths.size()-1)];
+			PrintWriter out = new PrintWriter(trustedSocket.getOutputStream(),true);
+			DataInputStream in= new DataInputStream(trustedSocket.getInputStream());
+	
+			System.out.println("Connected to localhost in port 4921 - User");
 			
-			System.out.print("Key Length = " + keyLengths.get(keyLengths.size()-1));
+			//Send the response that we are the aggregator to the trustedauthority
+			out.println(new String("Aggregator"));
 			
-			in.read(secretKey);
-
-			System.out.print(" Key = " + secretKey + "\n");
-			authorityKeys.add(secretKey);
-			//Change it to the actual secret key
-			signingKeys.add(new SecretKeySpec(secretKey,"HmacSHA1"));
-		}
-
-
+			System.out.println("Waiting for keys now - Aggregator");
+			
+			//Read in the key the trusted authority sends
+			//Thread.sleep(500);
+			//System.out.println(in.read());
+			//while(in.read() != 0){
+				System.out.println("Reading in the key values");
+				int length = in.readInt();
+				byte[] secretKey = new byte[length];
+				in.read(secretKey);
+				
+				secrets.add(new BigInteger(secretKey));
+				System.out.println("Added: " + new BigInteger(secretKey));
+				
+				
+				int length2 = in.readInt();
+				byte[] secretKey2 = new byte[length2];
+				in.read(secretKey2);
+				
+				secrets.add(new BigInteger(secretKey2));		
+				
+			//}
+		
+		
+		
 		} catch (UnknownHostException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 
 			
 		generateKey();
-		try{
-			ExecutorService userProcessingPool = Executors.newFixedThreadPool(2);
-			aggregatorSocket = new ServerSocket(4921);
-			System.out.println("Waiting for connections");
-			int threadNumber = 0;
-			while (true){
-				userSocket = aggregatorSocket.accept();
-				threadNumber++;
-				userProcessingPool.submit(new AggregationTask(userSocket));
-				if(threadNumber == 2){
-					break;
+		Runnable aggregatorTask = new Runnable() {
+			@Override
+			public void run() {
+				try{
+					aggregatorSocket = new ServerSocket(4921);
+					System.out.println("Waiting for connections");
+
+					while (true){
+						userSocket = aggregatorSocket.accept();
+						userProcessingPool.submit(new AggregationTask(userSocket));
+						connections++;
+					
+						try {
+							Thread.sleep(500);
+							decryptAggregate();
+						} catch (InterruptedException e) {
+					
+							e.printStackTrace();
+						}
+						//System.out.println("Cipher text lenght: " + cipherLengths.size());
+					}
+				}
+				catch(IOException e) {
+					System.err.println("Unable to process request");
+					e.printStackTrace();
 				}
 			}
-			System.out.print("cipherLengths.size() = " + cipherLengths.size());
-			userProcessingPool.shutdown();
-			userProcessingPool.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
-			if(cipherLengths.size() == 2){
-				System.out.print("cipherLengths.size() = " + cipherLengths.size());
-				decryptAggregate();
-			}
-		}
-		catch(IOException | InterruptedException e) {
-			System.err.println("Unable to process request");
-			e.printStackTrace();
-		}
+		};
+		Thread aggregatorThread = new Thread(aggregatorTask);
+		aggregatorThread.start();
 	}
-			
 	
 	private void generateKey() {
 		// Generating K0
 		int delta = 123456;
-		double doublem = Math.pow(2,(Math.log(2*delta)/Math.log(2)));
-		m = new BigInteger(ByteBuffer.allocate(8).putDouble(doublem).array());
+		
+		key = new byte[8];
+		m = 200000;
+		bigIntM =  new BigDecimal(m).toBigInteger();
+		
+		
 		System.out.println("Mac about to be initialized");
-		byte[] hMacResult;
-		BigInteger HMAC = null;
-		BigInteger HMACSum = new BigInteger("0");
 		try {
-			for(int i = 0; i < 2; i++){
-					
-				Mac mac = Mac.getInstance("HmacSHA1"); 
-				mac.init(signingKeys.get(i));
-				int t = 45;
-				hMacResult = mac.doFinal(ByteBuffer.allocate(t). array());
-				HMAC = new BigInteger(hMacResult);
-				HMACSum = HMACSum.add(HMAC);
+			//Mac mac = Mac.getInstance("HmacSHA1"); 
+			int t = 45;
+			
+			key0 = BigInteger.ZERO;
+			
+			for(int x = 0; x < secrets.size(); x++){
+				
+				Mac mac = Mac.getInstance("HmacSHA256"); 
+				SecretKeySpec signingKey = new SecretKeySpec(secrets.get(x).toByteArray(),"HmacSHA256");
+				mac.init(signingKey);
+								
+				byte[] hmacResult = mac.doFinal(ByteBuffer.allocate(4).putInt(t).array());
+			
+			
+				BigInteger HMAC = new BigInteger(hmacResult);
+				HMAC = HMAC.mod(bigIntM);
+				System.out.println("HMAC BigINT: " + HMAC);
+				
+			
+				key0 = key0.add(HMAC);
+				
 			}
 			
-			System.out.print("HMAC Sum = " + HMACSum);
+			//key0 = key0.mod(bigIntM);
+			System.out.println("Generated key0 in agg: " + key0);
 			
 			
-			//performing MOD M
-			key = HMACSum.mod(m);
-			
-			System.out.print("Key = " + key);
+		
 		}catch (NoSuchAlgorithmException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -149,21 +177,29 @@ public class Aggregator {
 	}
 
 	protected void decryptAggregate() {
-		BigInteger cipherSum = new BigInteger("0");
-		for(byte[] x: cipherTexts){
-			BigInteger cipherText = new BigInteger(x);
-			
-			cipherSum = cipherSum.add(cipherText);
-		}
 		
-		cipherSum.subtract(key);
-		sum = cipherSum.mod(m);
-		System.out.print("This is the sum: " + sum);
+		if(connections==2){
+
+		BigInteger sum = new BigInteger("0");
+		System.out.print("Trying to decrypt the values.");
+		
+		for(int x = 0; x<2; x ++){
+			
+			BigInteger val = new BigInteger(cipherTexts.get(x));
+			
+			sum = sum.add(val);
+		}
+		sum = sum.subtract(key0);
+		sum = sum.mod(bigIntM);
+		System.out.print("This is the sum aggregator got: " + sum);
+		
+		}
 	}
 
 	private class AggregationTask implements Runnable{
 
 		private final Socket userSocket;
+		
 		
 		private AggregationTask(Socket userSocket) {
 			this.userSocket = userSocket;
@@ -182,20 +218,15 @@ public class Aggregator {
 				byte[] cipherText = new byte[cipherLength];
 				dIn.read(cipherText);
 				
-				System.out.print("cipherLength received = " + cipherLength + "cipherText received = " + cipherText + "\n");
 				
-				
-				cipherLengths.add(cipherLength);
+				System.out.println("cipherText received = " + new BigInteger(cipherText));
+			
 				cipherTexts.add(cipherText);
+				cipherLengths.add(cipherLength);
 				
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
-			}
-			try{
-				userSocket.close();
-			}catch(IOException ioe){
-				System.out.print("Error closing user Connection");
 			}
 			
 		}

@@ -22,10 +22,12 @@ public class TrustedAuthority {
     final int PORT = 9090;
     ServerSocket serverSocket;
     Socket socket;
+    Socket aggSocket;
     int orderNumber;
     DataOutputStream out;
     int secretTotal = 0;
     ArrayList<BigInteger> keys = new ArrayList<BigInteger>();	
+    BigInteger valueTotal = BigInteger.ZERO;
     
     public static void main(String args[]) {
     	TrustedAuthority server = new TrustedAuthority ();
@@ -56,28 +58,50 @@ public class TrustedAuthority {
                 in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 out = new DataOutputStream(socket.getOutputStream());
                 
-                System.out.println("Trusted Authority recieved connection from " + serverSocket.getInetAddress().getHostName());
-
+                System.out.println("Connection received from " + socket.getInetAddress().getHostName());
+                
+                //Store the aggregator socket so we can send to him once we generate keys
+                System.out.println("Waiting for soemthing to be sent.");
+                
+                String str = new String(in.readLine());
+           
+                
+                System.out.println("Read str: " + str);
+                if(str.equals("Aggregator")){
+                	System.out.println("Aggregator connected");
+                	aggSocket = socket;	
+                }
+              
                 if(secretTotal ==2){
+                	
+                	System.out.println("Trying to send keys to aggregator now.");
+                	 out = new DataOutputStream(aggSocket.getOutputStream());
                 	
                 	//Sends both keys to the aggregator
                 	for(int x = 0; x < keys.size(); x++){
+                		System.out.println("Sending to aggregator: " + keys.get(x));
                 		out.writeInt(keys.get(x).toByteArray().length);
     					out.write(keys.get(x).toByteArray());
-    					
-    					System.out.print("Sent a key");
                 	}
-            	
+                	System.out.println("Done sendin both keys to aggregator");
+                	
+                	System.out.println("The secret total the aggregator should decrypt is : " + valueTotal);
+                	secretTotal = 0;
                 }
                 else{
-					Random rand = new Random(293318734);
-					BigInteger secretKey = new BigInteger(128,rand);
+                	
+					Random rand = new Random();
+					BigInteger secretKey = new BigInteger(56,rand);
 					
 					keys.add(secretKey);
 					secretTotal++;
 					
+					System.out.println("Generated Secret key for user: " + secretKey);
 					out.writeInt(secretKey.toByteArray().length);
 					out.write(secretKey.toByteArray());
+					System.out.println("Finished Sending keys to the user");
+
+					
                 }
 
             } catch (IOException e) {
